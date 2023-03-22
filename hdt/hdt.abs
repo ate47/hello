@@ -115,7 +115,7 @@ MultiSectionDictionary : Dictionary{ci.format = "<http://purl.org/HDT/hdt#dictio
     struct {
         vlong strSize;
         byte[] str;
-    } types;
+    }[] types;
     DictionarySection[] objects;
 }
 
