@@ -4,6 +4,7 @@
       - [Integers](#integers)
       - [Structure](#structure)
       - [Enum](#enum)
+      - [Union](#union)
     - [Inheritance](#inheritance)
     - [Initialization](#initialization)
     - [Literals](#literals)
@@ -73,6 +74,28 @@ MyStruct {
     MyEnum enum_value = MY_ENUM_VAR_2;
 }
 ```
+
+#### Union
+
+Union are for blocks with an unknown type at compile time, but can only be from multiple types, it is described in a `union` block or as an anonymous type.
+
+**Example**
+
+```regex
+union Number {
+    int integer_value;
+    long integer_long_value;
+}
+
+MyStruct {
+    union {
+        int32 value32;
+        int8 value8;
+    } myvalue;
+}
+```
+
+Values are accessed using `Number.integer_value`.
 
 ### Inheritance
 

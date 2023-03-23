@@ -1,7 +1,8 @@
 #include "hdt.abs"
 
 enum DictionarySectionType : byte {
-    TYPE_INDEX_RPL = 3,
+    TYPE_INDEX_RPL_INT_DELTA = 3,
+    TYPE_INDEX_RPL_INT_LOG = 4
 }
 
 RPLDictionary : Dictionary{ci.format = "<http://purl.org/HDT/hdt#dictionaryRpl>"} {
@@ -11,7 +12,7 @@ RPLDictionary : Dictionary{ci.format = "<http://purl.org/HDT/hdt#dictionaryRpl>"
     LiteralSections L;
 }
 
-IntSection : DictionarySection{header.type = TYPE_INDEX_RPL} {
+IntSectionDelta : DictionarySection{header.type = TYPE_INDEX_RPL_INT_DELTA} {
     struct {
         vlong numstrings;
         vlong bytes;
@@ -19,18 +20,38 @@ IntSection : DictionarySection{header.type = TYPE_INDEX_RPL} {
     } header;
     crc8 headerCrc;
     Sequence blocks;
-    PFCSectionDataChunk<header.blocksize>[] chunks;
+    IntSectionDataChunkDelta<header.blocksize>[] chunks;
     crc32 chunksCrc;
 }
 
-IntSectionDataChunk<blocksize> {
-    string firstStr;
-    byte firstStrEnd = '\0';
-    delta[blocksize] {
+IntSectionDataChunkDelta<blocksize> {
+    vlong firstStr;
+    struct {
         vlong delta;
-        string str;
-        byte strEnd = '\0';
-    }
+    }[blocksize - 1] others;
+}
+
+IntSectionLog: DictionarySection{header.type = TYPE_INDEX_RPL_INT_LOG} {
+    struct {
+        vlong numstrings;
+        vlong bytes;
+        bytes blocksize;
+    } header;
+    crc8 headerCrc;
+    Sequence blocks;
+    IntSectionDataChunkLog<header.blocksize>[] chunks;
+    crc32 chunksCrc;
+}
+
+IntSectionDataChunkLog<blocksize> {
+    vlong numbits;
+    union {
+        // log is used if numbits < 64; entries is used otherwise (big numbers >= 2^64)
+        SequenceLog log{header.numbits = numbits, header.numentries = blocksize};
+        struct{
+            vlong entry;
+        }[blocksize] entries;
+    } data;
 }
 
 LiteralSections {

@@ -89,11 +89,11 @@ PFCSection : DictionarySection{header.type = TYPE_INDEX} {
 PFCSectionDataChunk<blocksize> {
     string firstStr;
     byte firstStrEnd = '\0';
-    delta[blocksize] {
+    struct {
         vlong delta;
         string str;
         byte strEnd = '\0';
-    }
+    }[blocksize - 1] delta;
 }
 
 Dictionary {
