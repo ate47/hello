@@ -4,6 +4,11 @@
 
 HDT is a file format to store RDF dataset. the binary specs are described in [hdt.abs](hdt.abs), it can be combined with a co-index to handle non S?? queries described in [hdtIndex.abs](hdt.abs).
 
+**Others**
+
+- [Create an HDT from a Wikidata dump](hdt_wikidata_dump.md)
+- [HDT RPL Dict specification](hdt_dict_rpl.md)
+
 **Cool links**
 
 - [Website](https://www.rdfhdt.org/)
@@ -30,7 +35,11 @@ HDT is a file format to store RDF dataset. the binary specs are described in [hd
   - [CRC](#crc)
   - [ControlInfo](#controlinfo)
   - [SequenceLog](#sequencelog)
-  - [PFCSection](#pfcsection)
+  - [Dictionary](#dictionary)
+    - [PFCSection](#pfcsection)
+    - [Four section dictionary](#four-section-dictionary)
+    - [Prefix AND Suffix front-coded four section dictionary](#prefix-and-suffix-front-coded-four-section-dictionary)
+    - [Multisection dictionary](#multisection-dictionary)
 
 # HDT components
 
@@ -170,9 +179,30 @@ SequenceLog {
 
 You can find the Java implementation in the [org.rdfhdt.hdt.compact.sequence](https://github.com/rdfhdt/hdt-java/tree/master/hdt-java-core/src/main/java/org/rdfhdt/hdt/compact/sequence) package.
 
-## PFCSection
+## Dictionary
 
-A PFC section is a section to store ordered strings, it is composed of chunks with the same number of strings `blocksize`.
+An HDT dictionary is a structure to store the strings for the triple part.
+
+It should be able to answer 2 important functions:
+
+```c#
+string idToString(ulong id, RDFRole position);
+ulong stringToId(string str, RDFRole position);
+```
+
+`RDFRole` is the role in the RDF context: Subject, Predicate or Object.
+
+It is composed with a header to store the type of the dictionary.
+
+```c++
+Dictionary {
+    ControlInfo ci{type = DICTIONARY};
+}
+```
+
+### PFCSection
+
+A PFC section is a section to store ordered strings, it is composed of chunks with the same number of strings `blocksize`. Most of the dictionary implementations are using PFCSection.
 
 The size of a PFC section chunk isn't static because it is storing strings, to find the start index of a chunk $i$, you need to read the index $i$ of the `blocks` sequence.
 
@@ -225,5 +255,129 @@ PFCSectionDataChunk<blocksize> {
         string str;
         byte strEnd = '\0';
     }
+}
+```
+
+### Four section dictionary
+
+Type = `<http://purl.org/HDT/hdt#dictionaryFour>`, a four section dictionary is the default implementation of the HDT dictionary.
+
+It will store the 3 RDF roles into 4 PFCSections, the shared, subject, predicate and object sections.
+
+The shared section is composed of the shared elements from the subject and object sections.
+
+The subject and object sections are composed of the subjects and the objects that aren't in the shared section.
+
+The predicate section is composed of all the predicates.
+
+In an RDF perpective, it is most likely that a subject can also be an object, but less likely that a subject/object is a predicate. So we don't need to store more than that.
+
+It is also important because if a element is in a shared section, it can be easier for a SPARQL request to link it with a subject/object.
+
+```c++
+FourSectionDictionary : Dictionary{ci.format = "<http://purl.org/HDT/hdt#dictionaryFour>"} {
+    DictionarySection shared;
+    DictionarySection subjects;
+    DictionarySection predicates;
+    DictionarySection objects;
+}
+```
+
+The Id mapping is implemented as follow:
+
+```c#
+string idToString(ulong id, RDFRole position) {
+    switch (position) {
+        case PREDICATE: return predicates.idToString(id);
+        case SUBJECT:
+            if (id <= shared.getNumberOfElements()) {
+                return shared.idToString(id);
+            }
+            return subjects.idToString(id - shared.getNumberOfElements());
+        case OBJECT:
+            if (id <= shared.getNumberOfElements()) {
+                return shared.idToString(id);
+            }
+            return objects.idToString(id - shared.getNumberOfElements());
+    }
+}
+ulong stringToId(string str, RDFRole position) {
+    switch (position) {
+        case PREDICATE: return predicates.stringToId(str);
+        case SUBJECT:
+            ulong id = shared.stringToId(str);
+            if (id == 0) {
+                id = subject.stringToId(str);
+                if (id != 0) {
+                    return id + shared.getNumberOfElements();
+                }
+            }
+            return id;
+        case OBJECT:
+            ulong id = shared.stringToId(str);
+            if (id == 0) {
+                id = object.stringToId(str);
+                if (id != 0) {
+                    return id + shared.getNumberOfElements();
+                }
+            }
+            return id;
+    }
+}
+```
+
+### Prefix AND Suffix front-coded four section dictionary
+
+Type = `<http://purl.org/HDT/hdt#dictionaryFourPsfc>`, a Prefix AND Suffix Front-Coded (PSFC) Four Section dictionary is an extension of the Four Section dictionary where the literals are prefixed by their type or language tag,
+
+**example**
+
+The elements
+
+```turtle
+"antoine"^^<http://example.org/#cool>
+"voiture"@fr
+"bike"
+```
+
+Are stored into PSFC format into:
+
+```turtle
+^^<http://example.org/#cool>"antoine"
+@fr"voiture"
+"bike"
+```
+
+```c#
+string idToString(ulong id, RDFRole position) {
+    return PSFCEncode(super.idToString(id, position));
+}
+
+ulong stringToId(string str, RDFRole position) {
+    return super.stringToId(PSFCDecode(str), position);
+}
+```
+
+It is useful to store the typed literals to avoid using the space to store same suffix using prefix coding.
+
+It isn't used because of the multi-section dictionary
+
+### Multisection dictionary
+
+Type = `<http://purl.org/HDT/hdt#dictionaryMult>`, a Multisection dictionary is a version of the Four Section dictionary where the object section is splitted into multiple sections to depending on they type. Knowing a subject can't have a type, the shared section isn't impacted, it is only replacing the object section.
+
+The object section is converted into multiple PFCSection, we first encode the ordered types into a table `types` before writing the typed sections in the same order. The particular type `NO_DATATYPE` is used to store the elements without a type, the language type is used to describe literals with language.
+
+```c++
+MultiSectionDictionary : Dictionary{ci.format = "<http://purl.org/HDT/hdt#dictionaryMult>"} {
+    DictionarySection shared;
+    DictionarySection subject;
+    DictionarySection predicate;
+    vlong typeCount;
+    struct {
+        vlong strSize;
+        byte[] str;
+    }[] types;
+    DictionarySection[] objects;
 }
 ```
